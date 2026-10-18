@@ -380,6 +380,8 @@ namespace StonewardsSessionVisibility
                 ? new Color(0.97f, 0.85f, 0.60f, 1f)
                 : new Color(0.75f, 0.64f, 0.45f, 1f);
 
+            // Prevent the game's USS from supplying a white button image.
+            button.style.backgroundImage = StyleKeyword.None;
             button.style.backgroundColor = fill;
             button.style.borderLeftColor = gold;
             button.style.borderRightColor = gold;
