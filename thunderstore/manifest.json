@@ -1,0 +1,9 @@
+{
+  "name": "SessionVisibility",
+  "version_number": "0.1.0",
+  "website_url": "https://github.com/thereisnouser/stonewards-session-visibility",
+  "description": "Switch a Stonewards lobby between Friends and Public during a game using the in-game Session menu.",
+  "dependencies": [
+    "BepInEx-BepInExPack-5.4.2305"
+  ]
+}

@@ -1,50 +1,80 @@
-# Stonewards Session Visibility (v0.1.0 test build)
+# Stonewards Session Visibility
 
-Host-only BepInEx 5 plugin for **switching Friends / Public visibility of the same existing Steam lobby**, including during an active Stonewards match. No session restart and no client installation are intended to be needed.
+**Change your Steam lobby between Friends and Public while playing Stonewards, without recreating the session.** The host can switch visibility directly from the game's Session window.
 
-## Usage
+## ✨ Features
 
-1. Host a Steam lobby using a r2modman profile that has BepInEx 5 enabled.
-2. Open **Esc → Session**. The mod adds one native-styled **VISIBILITY: FRIENDS / PUBLIC** button inside the expanded native Session title header, directly beneath the session name (above the player list), with a pixel-art stepped-corner frame. It shows the current Friends/Public mode; click to switch between the two.
-3. Visibility does **not** change the game's existing `Joinable` flag. If the game has locked the lobby, switching to Public does not override the lock and new joins may remain blocked.
+- **In-session switching** — change lobby visibility between **Friends** and **Public** during an active game.
+- **Integrated controls** — use the **VISIBILITY** button in the Session window, directly beneath the session name.
+- **Game-style interface** — a pixel-art button with stepped corners, an expanded header, and room for all four player slots.
+- **Host-only access** — only the current Steam lobby owner can change visibility.
 
-## Build & install (PowerShell)
+## 🎮 How to use
 
-Extract this archive into `X:\projects\stonewards-session-visibility` (or another folder) and run:
+1. Host a Stonewards session.
+2. Open the pause menu and select **Session**.
+3. Click **VISIBILITY: FRIENDS** or **VISIBILITY: PUBLIC** in the session header to switch modes. The button displays the current mode.
+
+The switch is available **only through the Session menu**; there is no keyboard shortcut.
+
+## 📦 Installation
+
+Once available on Thunderstore, install **SessionVisibility** with **r2modman** or another compatible Thunderstore mod manager, then launch Stonewards through your modded profile. **BepInExPack** is listed as a package dependency.
+
+To build and install directly from this repository, see **Development** below.
+
+## 🔧 Compatibility
+
+- **Game:** Stonewards **0.2.3** (tested).
+- **Mod loader:** BepInEx 5.
+- **Multiplayer:** Host-only control. The button is shown only to the host; visibility changes act on the existing Steam lobby.
+
+## ⚠️ Known limitations
+
+- The selectable modes are **Friends** and **Public**, matching Stonewards' session creation options. The game's internal Private/locked state is not a separate option.
+- Changing visibility **does not override** Stonewards' lobby join lock. If the game currently blocks new players, switching to Public will not automatically allow them to join.
+
+## 🛠️ Development
+
+### Requirements
+
+- .NET SDK capable of building `netstandard2.1`
+- A local Stonewards installation (for the game's managed assemblies)
+- BepInEx 5 in the chosen r2modman profile
+
+### Building
+
+Clone the repository and run the included PowerShell build script. The r2modman profile name should match the repository name: `stonewards-session-visibility`.
 
 ```powershell
+$gameDir = Read-Host "Stonewards installation folder"
+$profileDir = Join-Path $env:APPDATA "r2modmanPlus-local\Stonewards\profiles\stonewards-session-visibility"
+
 powershell -ExecutionPolicy Bypass -File .\build-and-install.ps1 `
-  -GameDir "F:\Steam\steamapps\common\Stonewards" `
-  -ProfileDir "C:\Users\user\AppData\Roaming\r2modmanPlus-local\Stonewards\profiles\stonewards-session-visibility"
+  -GameDir $gameDir `
+  -ProfileDir $profileDir
 ```
 
-The r2modman profile name should match the repository name (`stonewards-session-visibility`). The script builds the DLL against **your installed game's managed assemblies** and copies it to the profile's `BepInEx/plugins` folder.
+The script builds `StonewardsSessionVisibility.dll` and installs it into the selected profile's `BepInEx/plugins` folder.
 
-## How it works
+To create the **v0.1.0 Thunderstore upload ZIP** from the release metadata, icon, and compiled DLL:
 
-- Checks for an active host via Mirror and verifies the local Steam user owns the active lobby.
-- Calls `Steamworks.SteamMatchmaking.SetLobbyType` on the current lobby (without creating a new lobby).
-- On success, updates `StoneWardsNetworkManager.HostedLobbyVisibility` via the game's `SetHostedLobbyVisibility` method.
-- Intentionally **does not use** `SteamLobby.UnlockLobby`, which is restricted by the game's network state in the inspected build.
-- Leaves all connected players, the game scene, and the `Joinable` flag alone.
+```powershell
+powershell -ExecutionPolicy Bypass -File .\package-thunderstore.ps1 `
+  -GameDir $gameDir `
+  -ProfileDir $profileDir
+```
 
-## Session menu layout
+The package script validates the manifest version, checks the 256×256 icon, and places the upload archive in `dist/`. It does **not** upload or publish the release.
 
-- Uses a generated point-filtered, nine-sliced pixel border with stepped corners instead of smooth corner-radius rendering.
-- Enlarges the Session popup and player-list scroll viewport together so all four player rows remain visible below the expanded heading.
-- Layout changes are applied once after UI Toolkit reports valid dimensions; guests do not receive host-only adjustments.
+### Implementation
 
-## Known limits / verification
+The BepInEx plugin integrates with Stonewards' `UISessionSettings` via Harmony. It verifies that the local Steam user owns the active lobby, calls `SteamMatchmaking.SetLobbyType`, and updates the game's hosted visibility state. The game's separate join-lock state is left unchanged.
 
-- **Source code not yet rebuilt or playtested after the UI change.** Compile and send build output or logs if the Session button does not appear or overlaps at your resolution.
-- The Steam API returns success/failure for a type change; Stonewards provides no public getter for current Steam lobby type. The UI reads the game's stored visibility setting, updated only after Steam accepts the change.
-- Verify visibility from a *second Steam account* in the public lobby browser and test that existing members remain connected.
-- The game's internal Private/locked Steam state is not exposed as a selectable mode. Its join lock is preserved.
+## 🔗 Links
 
-## Testing checklist
+[Report an issue](https://github.com/thereisnouser/stonewards-session-visibility/issues) · [Changelog](CHANGELOG.md)
 
-- Create Public lobby; switch to Friends mid-run; check it disappears from public discovery.
-- Invite a friend and test joining Friends (only when game `Joinable` permits).
-- Switch back to Public; check discovery and successful join.
-- Switch between hub and gameplay; verify UI mode, connections and state.
-- As non-host, verify no change of lobby visibility is possible.
+---
+
+*Made by thereisnouser*
