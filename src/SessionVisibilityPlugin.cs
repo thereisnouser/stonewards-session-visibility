@@ -35,6 +35,15 @@ namespace StonewardsSessionVisibility
         private static VisualElement _sessionHeader;
         private static Button _visibilityButton;
         private static bool _buttonHovered;
+        private static Texture2D _normalButtonTexture;
+        private static Texture2D _hoverButtonTexture;
+        private static bool _sessionLayoutExpanded;
+
+        // The original Session viewport fits four rows before we enlarge its
+        // title bar. Give both the roster viewport and popup room to grow.
+        private const float ExtraSessionHeight = 82f;
+        private const int CornerTextureSize = 32;
+        private const int CornerSlice = 12;
 
         private static bool Hosting => NetworkServer.active && NetworkClient.active;
 
@@ -78,6 +87,7 @@ namespace StonewardsSessionVisibility
             if (Time.unscaledTime < _nextUIRefresh)
                 return;
             _nextUIRefresh = Time.unscaledTime + 0.35f;
+            ExpandSessionLayout();
             RefreshUI();
         }
 
@@ -307,10 +317,17 @@ namespace StonewardsSessionVisibility
                 button.style.fontSize = 17;
                 button.style.unityFontStyleAndWeight = FontStyle.Bold;
                 button.style.unityTextAlign = TextAnchor.MiddleCenter;
-                button.style.borderLeftWidth = 2;
-                button.style.borderRightWidth = 2;
-                button.style.borderTopWidth = 2;
-                button.style.borderBottomWidth = 2;
+                // The border is drawn in a pixel-perfect nine-sliced texture.
+                // UI Toolkit's ordinary border radius would smooth the corners.
+                button.style.borderLeftWidth = 0;
+                button.style.borderRightWidth = 0;
+                button.style.borderTopWidth = 0;
+                button.style.borderBottomWidth = 0;
+                button.style.unitySliceLeft = CornerSlice;
+                button.style.unitySliceRight = CornerSlice;
+                button.style.unitySliceTop = CornerSlice;
+                button.style.unitySliceBottom = CornerSlice;
+                button.style.unityBackgroundImageTintColor = Color.white;
                 button.style.borderTopLeftRadius = 0;
                 button.style.borderTopRightRadius = 0;
                 button.style.borderBottomLeftRadius = 0;
@@ -325,6 +342,9 @@ namespace StonewardsSessionVisibility
                 int targetIndex = header.IndexOf(titleBranch) + 1;
                 if (button.parent != header || header.IndexOf(button) != targetIndex)
                     header.Insert(targetIndex, button);
+
+                if (!ReferenceEquals(_sessionScreen, screen))
+                    _sessionLayoutExpanded = false;
 
                 _sessionScreen = screen;
                 _sessionHeader = header;
@@ -348,30 +368,124 @@ namespace StonewardsSessionVisibility
                 TrySetVisibility(mode == Mode.Public ? Mode.Friends : Mode.Public);
         }
 
+        // Build a 32x32 raster border with genuine staircase corners.
+        // A 9-slice preserves the 12-pixel corner regions on every resolution.
+        private static int StairInset(int distanceFromEdge)
+        {
+            if (distanceFromEdge < 2) return 8;
+            if (distanceFromEdge < 4) return 6;
+            if (distanceFromEdge < 6) return 4;
+            if (distanceFromEdge < 8) return 2;
+            return 0;
+        }
+
+        private static bool InsideStaircase(int x, int y)
+        {
+            if (x < 0 || y < 0 ||
+                x >= CornerTextureSize || y >= CornerTextureSize)
+                return false;
+
+            int edgeX = Mathf.Min(x, CornerTextureSize - 1 - x);
+            int edgeY = Mathf.Min(y, CornerTextureSize - 1 - y);
+            return edgeX >= StairInset(edgeY) &&
+                   edgeY >= StairInset(edgeX);
+        }
+
+        private static Texture2D CreateButtonTexture(bool hovered)
+        {
+            var texture = new Texture2D(
+                CornerTextureSize, CornerTextureSize, TextureFormat.RGBA32, false);
+            texture.name = hovered
+                ? "StonewardsSessionVisibility_HoverFrame"
+                : "StonewardsSessionVisibility_NormalFrame";
+            texture.filterMode = FilterMode.Point;
+            texture.wrapMode = TextureWrapMode.Clamp;
+            texture.hideFlags = HideFlags.HideAndDontSave;
+
+            Color fill = hovered
+                ? new Color(0.27f, 0.33f, 0.40f, 1f)
+                : new Color(0.20f, 0.25f, 0.31f, 1f);
+            Color gold = hovered
+                ? new Color(0.97f, 0.85f, 0.60f, 1f)
+                : new Color(0.75f, 0.64f, 0.45f, 1f);
+
+            var pixels = new Color[CornerTextureSize * CornerTextureSize];
+            for (int y = 0; y < CornerTextureSize; ++y)
+            {
+                for (int x = 0; x < CornerTextureSize; ++x)
+                {
+                    if (!InsideStaircase(x, y))
+                    {
+                        pixels[y * CornerTextureSize + x] = Color.clear;
+                        continue;
+                    }
+
+                    // Two crisp pixels form the outer gold line, including
+                    // each step of the corner. The center uses a solid fill.
+                    bool interior =
+                        InsideStaircase(x - 2, y) &&
+                        InsideStaircase(x + 2, y) &&
+                        InsideStaircase(x, y - 2) &&
+                        InsideStaircase(x, y + 2);
+                    pixels[y * CornerTextureSize + x] =
+                        interior ? fill : gold;
+                }
+            }
+            texture.SetPixels(pixels);
+            texture.Apply(false, true);
+            return texture;
+        }
+
         private static void ApplyGameButtonStyle(Button button = null)
         {
             if (button == null) button = _visibilityButton;
             if (button == null) return;
 
-            // Stonewards dark-blue buttons use light text and gold borders.
-            // Inline styles override the white UI Toolkit default and USS hover.
-            Color fill = _buttonHovered
-                ? new Color(0.27f, 0.33f, 0.40f, 1f)
-                : new Color(0.20f, 0.25f, 0.31f, 1f);
-            Color gold = _buttonHovered
-                ? new Color(0.97f, 0.85f, 0.60f, 1f)
-                : new Color(0.75f, 0.64f, 0.45f, 1f);
+            if (_normalButtonTexture == null)
+                _normalButtonTexture = CreateButtonTexture(false);
+            if (_hoverButtonTexture == null)
+                _hoverButtonTexture = CreateButtonTexture(true);
 
-            // Prevent the game's USS from supplying a white button image.
-            button.style.backgroundImage = StyleKeyword.None;
-            button.style.backgroundColor = fill;
-            button.style.borderLeftColor = gold;
-            button.style.borderRightColor = gold;
-            button.style.borderTopColor = gold;
-            button.style.borderBottomColor = gold;
+            button.style.backgroundColor = Color.clear;
+            button.style.backgroundImage = new StyleBackground(
+                _buttonHovered ? _hoverButtonTexture : _normalButtonTexture);
             button.style.color = _buttonHovered
                 ? new Color(1f, 0.97f, 0.83f, 1f)
                 : new Color(0.96f, 0.94f, 0.88f, 1f);
+        }
+
+        private static void ExpandSessionLayout()
+        {
+            if (_sessionLayoutExpanded || _sessionScreen == null ||
+                _sessionScreen.panel == null || !Hosting)
+                return;
+
+            // The rows are added to a ScrollView's unity-content-container.
+            // Increasing only the popup would still clip the fourth player.
+            var rowContainer = _sessionScreen.Q<VisualElement>(
+                "unity-content-container");
+            ScrollView scroll = null;
+            for (VisualElement element = rowContainer; element != null;
+                 element = element.parent)
+            {
+                scroll = element as ScrollView;
+                if (scroll != null) break;
+            }
+
+            float popupHeight = _sessionScreen.resolvedStyle.height;
+            float viewportHeight = scroll == null
+                ? 0f : scroll.resolvedStyle.height;
+            if (popupHeight < 200f || viewportHeight < 100f)
+                return; // Wait until UI Toolkit has laid out the popup.
+
+            _sessionScreen.style.height = popupHeight + ExtraSessionHeight;
+            _sessionScreen.style.minHeight = popupHeight + ExtraSessionHeight;
+            scroll.style.height = viewportHeight + ExtraSessionHeight;
+            scroll.style.minHeight = viewportHeight + ExtraSessionHeight;
+            _sessionLayoutExpanded = true;
+            _plugin?.Logger.LogInfo(
+                "Expanded Session popup and player viewport by " +
+                ExtraSessionHeight + " UI units.");
         }
 
         private static void RefreshUI()
@@ -414,6 +528,14 @@ namespace StonewardsSessionVisibility
             _sessionHeader = null;
             _visibilityButton = null;
             _buttonHovered = false;
+            _sessionLayoutExpanded = false;
+
+            if (_normalButtonTexture != null)
+                Destroy(_normalButtonTexture);
+            if (_hoverButtonTexture != null)
+                Destroy(_hoverButtonTexture);
+            _normalButtonTexture = null;
+            _hoverButtonTexture = null;
         }
     }
 }

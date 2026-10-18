@@ -5,7 +5,7 @@ Host-only BepInEx 5 plugin for **switching Friends / Public visibility of the sa
 ## Usage
 
 1. Host a Steam lobby using a r2modman profile that has BepInEx 5 enabled.
-2. Open **Esc → Session**. The mod adds one native-styled **VISIBILITY: FRIENDS / PUBLIC** button inside the expanded native Session title header, directly beneath the session name (above the player list). It shows the current Friends/Public mode; click to switch between the two.
+2. Open **Esc → Session**. The mod adds one native-styled **VISIBILITY: FRIENDS / PUBLIC** button inside the expanded native Session title header, directly beneath the session name (above the player list), with a pixel-art stepped-corner frame. It shows the current Friends/Public mode; click to switch between the two.
 3. Visibility does **not** change the game's existing `Joinable` flag. If the game has locked the lobby, switching to Public does not override the lock and new joins may remain blocked.
 
 ## Build & install (PowerShell)
@@ -27,6 +27,12 @@ The r2modman profile name should match the repository name (`stonewards-session-
 - On success, updates `StoneWardsNetworkManager.HostedLobbyVisibility` via the game's `SetHostedLobbyVisibility` method.
 - Intentionally **does not use** `SteamLobby.UnlockLobby`, which is restricted by the game's network state in the inspected build.
 - Leaves all connected players, the game scene, and the `Joinable` flag alone.
+
+## Session menu layout
+
+- Uses a generated point-filtered, nine-sliced pixel border with stepped corners instead of smooth corner-radius rendering.
+- Enlarges the Session popup and player-list scroll viewport together so all four player rows remain visible below the expanded heading.
+- Layout changes are applied once after UI Toolkit reports valid dimensions; guests do not receive host-only adjustments.
 
 ## Known limits / verification
 

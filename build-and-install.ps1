@@ -27,4 +27,4 @@ $dest = Join-Path $plugins 'StonewardsSessionVisibility.dll'
 Copy-Item -LiteralPath $dll -Destination $dest -Force
 Write-Host "Installed: $dest" -ForegroundColor Green
 Write-Host 'Launch Stonewards through this r2modman profile; host a lobby; open Esc -> Session Settings.'
-Write-Host 'F7 toggles between Public and Private.'
+Write-Host 'Use Esc -> Session to switch between Friends and Public.'
