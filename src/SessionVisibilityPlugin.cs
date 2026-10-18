@@ -34,12 +34,9 @@ namespace StonewardsSessionVisibility
         private static PropertyInfo _hostedModeProperty;
         private static MethodInfo _setHostedModeMethod;
 
-        private static VisualElement _modePanel;
-        private static Label _statusLabel;
-        private static Label _noticeLabel;
-        private static Button _privateButton;
-        private static Button _friendsButton;
-        private static Button _publicButton;
+        private static VisualElement _sessionScreen;
+        private static Button _returnButton;
+        private static Button _visibilityButton;
 
         private static bool Hosting => NetworkServer.active && NetworkClient.active;
 
@@ -65,11 +62,17 @@ namespace StonewardsSessionVisibility
             _harmony = new Harmony(Guid);
             var menuType = AccessTools.TypeByName("UISessionSettings");
             var menuAwake = menuType == null ? null : AccessTools.Method(menuType, "Awake");
-            var postfix = AccessTools.Method(typeof(SessionVisibilityPlugin), nameof(OnSessionSettingsAwake));
-            if (menuAwake != null && postfix != null)
-                _harmony.Patch(menuAwake, postfix: new HarmonyMethod(postfix));
+            var awakePostfix = AccessTools.Method(typeof(SessionVisibilityPlugin), nameof(OnSessionSettingsAwake));
+            var menuShow = menuType == null ? null : AccessTools.Method(menuType, "BaseShow");
+            var showPostfix = AccessTools.Method(typeof(SessionVisibilityPlugin), nameof(OnSessionSettingsShown));
+            if (menuAwake != null && awakePostfix != null)
+                _harmony.Patch(menuAwake, postfix: new HarmonyMethod(awakePostfix));
             else
-                Logger.LogWarning("Could not patch UISessionSettings.Awake. The F7 hotkey will still work.");
+                Logger.LogWarning("Could not patch UISessionSettings.Awake; trying BaseShow instead.");
+            if (menuShow != null && showPostfix != null)
+                _harmony.Patch(menuShow, postfix: new HarmonyMethod(showPostfix));
+            else
+                Logger.LogWarning("Could not patch UISessionSettings.BaseShow; menu integration may be unavailable.");
 
             if (_steamLobbyType == null || _lobbyIdField == null || _hostedModeProperty == null || _setHostedModeMethod == null)
                 Logger.LogWarning("Lobby metadata differs from the inspected build. Switching will fail safely.");
@@ -88,6 +91,9 @@ namespace StonewardsSessionVisibility
                     TrySetVisibility(mode == Mode.Public ? Mode.Private : Mode.Public);
             }
 
+            // UI Toolkit measures the pause menu after it opens; follow the
+            // native Return button even when the resolution or layout changes.
+            PositionVisibilityButton();
             if (Time.unscaledTime < _nextUIRefresh)
                 return;
             _nextUIRefresh = Time.unscaledTime + 0.35f;
@@ -199,136 +205,122 @@ namespace StonewardsSessionVisibility
             }
         }
 
-        // Patched after the native menu has resolved its UI Toolkit elements.
+        // The Awake hook mounts early, while BaseShow retries once Session opens.
+        // This avoids depending on the title's hierarchy or a single UI event.
         private static void OnSessionSettingsAwake(object __instance)
+        {
+            MountVisibilityButton(__instance);
+        }
+
+        private static void OnSessionSettingsShown(object __instance, bool show)
+        {
+            if (!show) return;
+            MountVisibilityButton(__instance);
+            RefreshUI();
+        }
+
+        private static void MountVisibilityButton(object menu)
         {
             if (_plugin == null) return;
             try
             {
-                var component = __instance as Component;
+                var component = menu as Component;
                 var document = component == null ? null : component.GetComponent<UIDocument>();
                 var root = document == null ? null : document.rootVisualElement;
                 var screen = root == null ? null : root.Q<VisualElement>("SessionSettings");
-                if (screen == null)
-                    return;
-                if (screen.Q<VisualElement>("StonewardsSessionVisibilityPanel") != null)
-                    return;
+                var nativeReturn = screen == null ? null : screen.Q<Button>("SessionReturnButton");
+                if (screen == null || nativeReturn == null) return;
 
-                var panel = new VisualElement { name = "StonewardsSessionVisibilityPanel" };
-                panel.style.flexDirection = FlexDirection.Column;
-                panel.style.marginTop = 8;
-                panel.style.marginBottom = 8;
-                panel.style.marginLeft = 12;
-                panel.style.marginRight = 12;
-                panel.style.paddingTop = 9;
-                panel.style.paddingBottom = 9;
-                panel.style.paddingLeft = 12;
-                panel.style.paddingRight = 12;
-                panel.style.backgroundColor = new Color(0.075f, 0.084f, 0.098f, 0.92f);
-                Color border = new Color(0.59f, 0.50f, 0.34f, 0.8f);
-                panel.style.borderBottomWidth = 1;
-                panel.style.borderTopWidth = 1;
-                panel.style.borderLeftWidth = 1;
-                panel.style.borderRightWidth = 1;
-                panel.style.borderBottomColor = border;
-                panel.style.borderTopColor = border;
-                panel.style.borderLeftColor = border;
-                panel.style.borderRightColor = border;
-
-                _statusLabel = new Label("LOBBY VISIBILITY");
-                _statusLabel.style.fontSize = 15;
-                _statusLabel.style.color = new Color(0.91f, 0.84f, 0.66f);
-                _statusLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
-                _statusLabel.style.marginBottom = 6;
-                panel.Add(_statusLabel);
-
-                var buttons = new VisualElement();
-                buttons.style.flexDirection = FlexDirection.Row;
-                buttons.style.flexWrap = Wrap.Wrap;
-                var returnButton = screen.Q<Button>("SessionReturnButton");
-                _privateButton = MakeButton("PRIVATE", Mode.Private, returnButton);
-                _friendsButton = MakeButton("FRIENDS", Mode.FriendsOnly, returnButton);
-                _publicButton = MakeButton("PUBLIC", Mode.Public, returnButton);
-                buttons.Add(_privateButton);
-                buttons.Add(_friendsButton);
-                buttons.Add(_publicButton);
-                panel.Add(buttons);
-
-                _noticeLabel = new Label("Host only  •  F7: Public / Private");
-                _noticeLabel.style.fontSize = 11;
-                _noticeLabel.style.marginTop = 5;
-                _noticeLabel.style.color = new Color(0.72f, 0.72f, 0.69f);
-                panel.Add(_noticeLabel);
-
-                // Put controls in the native Session Settings view, directly after
-                // its title section, rather than creating a permanently visible HUD.
-                var title = screen.Q<Label>("SessionTitle");
-                VisualElement titleHolder = title == null ? null : title.parent;
-                VisualElement hostContainer = titleHolder == null ? null : titleHolder.parent;
-                if (hostContainer != null)
+                if (_visibilityButton != null &&
+                    ReferenceEquals(_sessionScreen, screen) &&
+                    _visibilityButton.parent != null)
                 {
-                    int index = hostContainer.IndexOf(titleHolder);
-                    hostContainer.Insert(index + 1, panel);
+                    _returnButton = nativeReturn;
+                    return;
                 }
-                else
-                    screen.Add(panel);
-                _modePanel = panel;
+
+                // Mount inside the actual Session screen, not beside its title
+                // in an unrelated container of the pause-menu visual tree.
+                var button = screen.Q<Button>("StonewardsSessionVisibilityToggle");
+                if (button == null)
+                {
+                    button = new Button(ToggleFromMenu)
+                    {
+                        name = "StonewardsSessionVisibilityToggle",
+                        text = "VISIBILITY: PUBLIC"
+                    };
+                    // Reuse the game's button classes, fonts and border artwork.
+                    foreach (var className in nativeReturn.GetClasses())
+                        button.AddToClassList(className);
+
+                    button.style.position = Position.Absolute;
+                    button.style.marginLeft = 0;
+                    button.style.marginRight = 0;
+                    button.style.marginTop = 0;
+                    button.style.marginBottom = 0;
+                    button.style.paddingLeft = 8;
+                    button.style.paddingRight = 8;
+                    button.style.fontSize = 14;
+                    button.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    screen.Add(button);
+                }
+
+                _sessionScreen = screen;
+                _returnButton = nativeReturn;
+                _visibilityButton = button;
                 _plugin._lastDisplayedMode = -999;
+                PositionVisibilityButton();
                 RefreshUI();
-                _plugin.Logger.LogInfo("Lobby visibility buttons added to Session Settings.");
+                _plugin.Logger.LogInfo("Session visibility toggle mounted above Return.");
             }
             catch (Exception ex)
             {
-                _plugin.Logger.LogError("Failed adding lobby controls to the native menu. Hotkey remains available: " + ex);
+                _plugin.Logger.LogError("Could not mount Session visibility toggle: " + ex);
             }
         }
 
-        private static Button MakeButton(string text, Mode target, Button nativeButton)
+        private static void ToggleFromMenu()
         {
-            var button = new Button(() => TrySetVisibility(target)) { text = text };
-            // Reuse class-based native USS styling where possible.
-            if (nativeButton != null)
-                foreach (var className in nativeButton.GetClasses())
-                    button.AddToClassList(className);
-            button.style.flexGrow = 1;
-            button.style.minWidth = 86;
-            button.style.height = 32;
-            button.style.marginRight = 4;
-            button.style.marginBottom = 3;
-            button.style.paddingLeft = 6;
-            button.style.paddingRight = 6;
-            button.style.fontSize = 12;
-            button.style.unityFontStyleAndWeight = FontStyle.Bold;
-            return button;
+            Mode mode;
+            if (TryReadMode(out mode))
+                TrySetVisibility(mode == Mode.Public ? Mode.Private : Mode.Public);
         }
 
-        private static void UpdateButton(Button button, bool selected, bool usable)
+        private static void PositionVisibilityButton()
         {
-            if (button == null) return;
-            button.SetEnabled(usable);
-            button.style.backgroundColor = selected
-                ? new Color(0.43f, 0.36f, 0.24f, 1f)
-                : new Color(0.17f, 0.18f, 0.19f, 1f);
-            button.style.color = usable
-                ? (selected ? new Color(1f, 0.92f, 0.70f) : Color.white)
-                : new Color(0.48f, 0.48f, 0.48f);
+            if (_visibilityButton == null || _returnButton == null ||
+                _sessionScreen == null || _visibilityButton.panel == null)
+                return;
+
+            Rect nativeRect = _returnButton.worldBound;
+            if (nativeRect.width < 1f || nativeRect.height < 1f) return;
+
+            // Center in the space between the four player rows and Return.
+            float width = Mathf.Min(300f, nativeRect.width * 0.82f);
+            float height = Mathf.Clamp(nativeRect.height * 0.62f, 28f, 36f);
+            Vector2 point = _sessionScreen.WorldToLocal(
+                new Vector2(nativeRect.center.x, nativeRect.yMin - height - 7f));
+            _visibilityButton.style.left = point.x - width * 0.5f;
+            _visibilityButton.style.top = point.y;
+            _visibilityButton.style.width = width;
+            _visibilityButton.style.height = height;
         }
 
         private static void RefreshUI()
         {
-            if (_modePanel == null || _modePanel.panel == null) return;
+            if (_visibilityButton == null || _visibilityButton.panel == null) return;
             CSteamID lobbyId;
             Mode current = Mode.Private;
             bool usable = TryGetLobby(out lobbyId) && TryReadMode(out current);
-            bool locked = false;
-            if (usable)
-            {
-                try { locked = IsGameLocked(lobbyId); }
-                catch (Exception) { /* Some Steam states do not expose lobby data yet. */ }
-            }
-            else current = Mode.Private;
+            // Host only: do not alter the Session menu on guests' clients.
+            _visibilityButton.style.display = usable ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!usable) return;
 
-            int modeNumber = usable ? (int)current : -1;
+            bool locked = false;
+            try { locked = IsGameLocked(lobbyId); }
+            catch (Exception) { /* Some Steam states do not expose lobby data yet. */ }
+
+            int modeNumber = (int)current;
             if (_plugin != null && _plugin._lastDisplayedMode == modeNumber &&
                 _plugin._lastDisplayedLocked == locked) return;
             if (_plugin != null)
@@ -337,29 +329,23 @@ namespace StonewardsSessionVisibility
                 _plugin._lastDisplayedLocked = locked;
             }
 
-            if (_statusLabel != null)
-                _statusLabel.text = usable ? "LOBBY VISIBILITY  ·  " + current.ToString().ToUpperInvariant() : "LOBBY VISIBILITY";
-            UpdateButton(_privateButton, usable && current == Mode.Private, usable);
-            UpdateButton(_friendsButton, usable && current == Mode.FriendsOnly, usable);
-            UpdateButton(_publicButton, usable && current == Mode.Public, usable);
-            if (_noticeLabel != null)
-                _noticeLabel.text = !usable
-                    ? "Host of an active Steam lobby only"
-                    : locked
-                        ? "Game locked new joins. Visibility changes do not override that lock."
-                        : "F7: Public / Private  ·  Existing players stay connected";
+            // Text shows the current mode; clicking toggles Public/Private.
+            // Friends-only rooms become Public on the first click.
+            _visibilityButton.text = current == Mode.FriendsOnly
+                ? "VISIBILITY: FRIENDS"
+                : "VISIBILITY: " + current.ToString().ToUpperInvariant();
+            _visibilityButton.tooltip = locked
+                ? "The game's join lock remains active after changing visibility."
+                : "Click to switch Public / Private. F7 also toggles visibility.";
         }
 
         private void OnDestroy()
         {
             if (_harmony != null) _harmony.UnpatchSelf();
             if (ReferenceEquals(_plugin, this)) _plugin = null;
-            _modePanel = null;
-            _statusLabel = null;
-            _noticeLabel = null;
-            _privateButton = null;
-            _friendsButton = null;
-            _publicButton = null;
+            _sessionScreen = null;
+            _returnButton = null;
+            _visibilityButton = null;
         }
     }
 }
