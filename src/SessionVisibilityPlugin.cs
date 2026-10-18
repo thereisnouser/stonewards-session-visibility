@@ -1,12 +1,10 @@
 using System;
 using System.Reflection;
 using BepInEx;
-using BepInEx.Configuration;
 using HarmonyLib;
 using Mirror;
 using Steamworks;
 using UnityEngine;
-using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
 
 namespace StonewardsSessionVisibility
@@ -18,12 +16,10 @@ namespace StonewardsSessionVisibility
         public const string Name = "Stonewards Session Visibility";
         public const string Version = "0.1.0";
 
-        // Stonewards offers Friend and Public. Private (0) is an internal lobby lock.
-        private enum Mode { Friend = 1, Public = 2 }
+        // Stonewards offers Friends and Public. Private (0) is an internal lobby lock.
+        private enum Mode { Friends = 1, Public = 2 }
 
         private Harmony _harmony;
-        private ConfigEntry<bool> _enableHotkey;
-        private ConfigEntry<Key> _toggleKey;
         private float _nextUIRefresh;
         private int _lastDisplayedMode = -999;
         private bool _lastDisplayedLocked;
@@ -45,11 +41,6 @@ namespace StonewardsSessionVisibility
         private void Awake()
         {
             _plugin = this;
-            _enableHotkey = Config.Bind("Controls", "EnableHotkey", true,
-                "Allow switching between Friend and Public with a keyboard shortcut.");
-            _toggleKey = Config.Bind("Controls", "ToggleKey", Key.F7,
-                "Key to switch between Friend and Public. F7 by default; F8/F9 are used by other mods.");
-
             _steamLobbyType = AccessTools.TypeByName("SteamLobby");
             if (_steamLobbyType != null)
             {
@@ -79,20 +70,11 @@ namespace StonewardsSessionVisibility
             if (_steamLobbyType == null || _lobbyIdField == null || _hostedModeProperty == null || _setHostedModeMethod == null)
                 Logger.LogWarning("Lobby metadata differs from the inspected build. Switching will fail safely.");
 
-            Logger.LogInfo("Stonewards Session Visibility v" + Version + " initialized. Host-only; F7 toggles Friend/Public.");
+            Logger.LogInfo("Stonewards Session Visibility v" + Version + " initialized. Host-only; use Esc > Session.");
         }
 
         private void Update()
         {
-            if (_enableHotkey.Value && Hosting &&
-                _toggleKey.Value != Key.None && Keyboard.current != null &&
-                Keyboard.current[_toggleKey.Value].wasPressedThisFrame)
-            {
-                Mode mode;
-                if (TryReadMode(out mode))
-                    TrySetVisibility(mode == Mode.Public ? Mode.Friend : Mode.Public);
-            }
-
             if (Time.unscaledTime < _nextUIRefresh)
                 return;
             _nextUIRefresh = Time.unscaledTime + 0.35f;
@@ -123,7 +105,7 @@ namespace StonewardsSessionVisibility
 
         private static bool TryReadMode(out Mode mode)
         {
-            mode = Mode.Friend;
+            mode = Mode.Friends;
             if (!Hosting || _hostedModeProperty == null) return false;
             var manager = StoneWardsNetworkManager.Instance;
             if (manager == null) return false;
@@ -168,7 +150,7 @@ namespace StonewardsSessionVisibility
             ELobbyType steamMode;
             switch (requestedMode)
             {
-                case Mode.Friend: steamMode = ELobbyType.k_ELobbyTypeFriendsOnly; break;
+                case Mode.Friends: steamMode = ELobbyType.k_ELobbyTypeFriendsOnly; break;
                 case Mode.Public: steamMode = ELobbyType.k_ELobbyTypePublic; break;
                 default: return false;
             }
@@ -250,7 +232,7 @@ namespace StonewardsSessionVisibility
                 if (screen == null || title == null || nativeReturn == null)
                 {
                     _plugin.Logger.LogWarning(
-                        "Native Session title or Return button not found; F7 remains available.");
+                        "Native Session title or Return button not found; visibility control unavailable.");
                     return;
                 }
 
@@ -363,7 +345,7 @@ namespace StonewardsSessionVisibility
         {
             Mode mode;
             if (TryReadMode(out mode))
-                TrySetVisibility(mode == Mode.Public ? Mode.Friend : Mode.Public);
+                TrySetVisibility(mode == Mode.Public ? Mode.Friends : Mode.Public);
         }
 
         private static void ApplyGameButtonStyle(Button button = null)
@@ -396,7 +378,7 @@ namespace StonewardsSessionVisibility
         {
             if (_visibilityButton == null || _visibilityButton.panel == null) return;
             CSteamID lobbyId;
-            Mode current = Mode.Friend;
+            Mode current = Mode.Friends;
             bool usable = TryGetLobby(out lobbyId) && TryReadMode(out current);
             // Host only: do not alter the Session menu on guests' clients.
             _visibilityButton.style.display = usable ? DisplayStyle.Flex : DisplayStyle.None;
@@ -417,11 +399,11 @@ namespace StonewardsSessionVisibility
 
             _visibilityButton.text = current == Mode.Public
                 ? "VISIBILITY: PUBLIC"
-                : "VISIBILITY: FRIEND";
+                : "VISIBILITY: FRIENDS";
             ApplyGameButtonStyle();
             _visibilityButton.tooltip = locked
                 ? "The game's join lock remains active after changing visibility."
-                : "Click to switch Friend / Public. F7 also toggles visibility.";
+                : "Click to switch Friends / Public.";
         }
 
         private void OnDestroy()
