@@ -18,7 +18,8 @@ namespace StonewardsSessionVisibility
         public const string Name = "Stonewards Session Visibility";
         public const string Version = "0.1.0";
 
-        private enum Mode { Private = 0, FriendsOnly = 1, Public = 2 }
+        // Stonewards offers Friend and Public. Private (0) is an internal lobby lock.
+        private enum Mode { Friend = 1, Public = 2 }
 
         private Harmony _harmony;
         private ConfigEntry<bool> _enableHotkey;
@@ -37,6 +38,7 @@ namespace StonewardsSessionVisibility
         private static VisualElement _sessionScreen;
         private static VisualElement _sessionHeader;
         private static Button _visibilityButton;
+        private static bool _buttonHovered;
 
         private static bool Hosting => NetworkServer.active && NetworkClient.active;
 
@@ -44,9 +46,9 @@ namespace StonewardsSessionVisibility
         {
             _plugin = this;
             _enableHotkey = Config.Bind("Controls", "EnableHotkey", true,
-                "Allow switching between Public and Private with a keyboard shortcut.");
+                "Allow switching between Friend and Public with a keyboard shortcut.");
             _toggleKey = Config.Bind("Controls", "ToggleKey", Key.F7,
-                "Key to switch between Public and Private. F7 by default; F8/F9 are used by other mods.");
+                "Key to switch between Friend and Public. F7 by default; F8/F9 are used by other mods.");
 
             _steamLobbyType = AccessTools.TypeByName("SteamLobby");
             if (_steamLobbyType != null)
@@ -77,7 +79,7 @@ namespace StonewardsSessionVisibility
             if (_steamLobbyType == null || _lobbyIdField == null || _hostedModeProperty == null || _setHostedModeMethod == null)
                 Logger.LogWarning("Lobby metadata differs from the inspected build. Switching will fail safely.");
 
-            Logger.LogInfo("Stonewards Session Visibility v" + Version + " initialized. Host-only; F7 toggles Public/Private.");
+            Logger.LogInfo("Stonewards Session Visibility v" + Version + " initialized. Host-only; F7 toggles Friend/Public.");
         }
 
         private void Update()
@@ -88,7 +90,7 @@ namespace StonewardsSessionVisibility
             {
                 Mode mode;
                 if (TryReadMode(out mode))
-                    TrySetVisibility(mode == Mode.Public ? Mode.Private : Mode.Public);
+                    TrySetVisibility(mode == Mode.Public ? Mode.Friend : Mode.Public);
             }
 
             if (Time.unscaledTime < _nextUIRefresh)
@@ -121,14 +123,14 @@ namespace StonewardsSessionVisibility
 
         private static bool TryReadMode(out Mode mode)
         {
-            mode = Mode.Private;
+            mode = Mode.Friend;
             if (!Hosting || _hostedModeProperty == null) return false;
             var manager = StoneWardsNetworkManager.Instance;
             if (manager == null) return false;
             try
             {
                 int n = Convert.ToInt32(_hostedModeProperty.GetValue(manager, null));
-                if (n < 0 || n > 2) return false;
+                if (n != 1 && n != 2) return false;
                 mode = (Mode)n;
                 return true;
             }
@@ -166,8 +168,7 @@ namespace StonewardsSessionVisibility
             ELobbyType steamMode;
             switch (requestedMode)
             {
-                case Mode.Private: steamMode = ELobbyType.k_ELobbyTypePrivate; break;
-                case Mode.FriendsOnly: steamMode = ELobbyType.k_ELobbyTypeFriendsOnly; break;
+                case Mode.Friend: steamMode = ELobbyType.k_ELobbyTypeFriendsOnly; break;
                 case Mode.Public: steamMode = ELobbyType.k_ELobbyTypePublic; break;
                 default: return false;
             }
@@ -279,7 +280,33 @@ namespace StonewardsSessionVisibility
                     };
                     foreach (var className in nativeReturn.GetClasses())
                         button.AddToClassList(className);
+                    button.RegisterCallback<PointerEnterEvent>(_ =>
+                    {
+                        _buttonHovered = true;
+                        ApplyGameButtonStyle();
+                    });
+                    button.RegisterCallback<PointerLeaveEvent>(_ =>
+                    {
+                        _buttonHovered = false;
+                        ApplyGameButtonStyle();
+                    });
+                    button.RegisterCallback<FocusInEvent>(_ =>
+                    {
+                        _buttonHovered = true;
+                        ApplyGameButtonStyle();
+                    });
+                    button.RegisterCallback<FocusOutEvent>(_ =>
+                    {
+                        _buttonHovered = false;
+                        ApplyGameButtonStyle();
+                    });
                 }
+
+                // UXML and GenericButton provide extra styling to native
+                // buttons: copying only USS classes left this button white.
+                var gameFont = nativeReturn.resolvedStyle.unityFont;
+                if (gameFont != null)
+                    button.style.unityFont = gameFont;
 
                 button.style.position = Position.Relative;
                 button.style.alignSelf = Align.Center;
@@ -288,16 +315,25 @@ namespace StonewardsSessionVisibility
                 button.style.width = new Length(55, LengthUnit.Percent);
                 button.style.minWidth = 220;
                 button.style.maxWidth = 350;
-                button.style.height = 35;
+                button.style.height = 39;
                 button.style.marginTop = 7;
                 button.style.marginBottom = 0;
                 button.style.marginLeft = 0;
                 button.style.marginRight = 0;
                 button.style.paddingLeft = 8;
                 button.style.paddingRight = 8;
-                button.style.fontSize = 14;
+                button.style.fontSize = 17;
                 button.style.unityFontStyleAndWeight = FontStyle.Bold;
                 button.style.unityTextAlign = TextAnchor.MiddleCenter;
+                button.style.borderLeftWidth = 2;
+                button.style.borderRightWidth = 2;
+                button.style.borderTopWidth = 2;
+                button.style.borderBottomWidth = 2;
+                button.style.borderTopLeftRadius = 0;
+                button.style.borderTopRightRadius = 0;
+                button.style.borderBottomLeftRadius = 0;
+                button.style.borderBottomRightRadius = 0;
+                ApplyGameButtonStyle(button);
 
                 // Insert immediately after the branch containing the title.
                 // Native player rows are untouched and remain below the header.
@@ -311,6 +347,8 @@ namespace StonewardsSessionVisibility
                 _sessionScreen = screen;
                 _sessionHeader = header;
                 _visibilityButton = button;
+                _buttonHovered = false;
+                ApplyGameButtonStyle();
                 _plugin._lastDisplayedMode = -999;
                 RefreshUI();
                 _plugin.Logger.LogInfo("Visibility toggle embedded in expanded Session title header.");
@@ -325,14 +363,38 @@ namespace StonewardsSessionVisibility
         {
             Mode mode;
             if (TryReadMode(out mode))
-                TrySetVisibility(mode == Mode.Public ? Mode.Private : Mode.Public);
+                TrySetVisibility(mode == Mode.Public ? Mode.Friend : Mode.Public);
+        }
+
+        private static void ApplyGameButtonStyle(Button button = null)
+        {
+            if (button == null) button = _visibilityButton;
+            if (button == null) return;
+
+            // Stonewards dark-blue buttons use light text and gold borders.
+            // Inline styles override the white UI Toolkit default and USS hover.
+            Color fill = _buttonHovered
+                ? new Color(0.27f, 0.33f, 0.40f, 1f)
+                : new Color(0.20f, 0.25f, 0.31f, 1f);
+            Color gold = _buttonHovered
+                ? new Color(0.97f, 0.85f, 0.60f, 1f)
+                : new Color(0.75f, 0.64f, 0.45f, 1f);
+
+            button.style.backgroundColor = fill;
+            button.style.borderLeftColor = gold;
+            button.style.borderRightColor = gold;
+            button.style.borderTopColor = gold;
+            button.style.borderBottomColor = gold;
+            button.style.color = _buttonHovered
+                ? new Color(1f, 0.97f, 0.83f, 1f)
+                : new Color(0.96f, 0.94f, 0.88f, 1f);
         }
 
         private static void RefreshUI()
         {
             if (_visibilityButton == null || _visibilityButton.panel == null) return;
             CSteamID lobbyId;
-            Mode current = Mode.Private;
+            Mode current = Mode.Friend;
             bool usable = TryGetLobby(out lobbyId) && TryReadMode(out current);
             // Host only: do not alter the Session menu on guests' clients.
             _visibilityButton.style.display = usable ? DisplayStyle.Flex : DisplayStyle.None;
@@ -351,14 +413,13 @@ namespace StonewardsSessionVisibility
                 _plugin._lastDisplayedLocked = locked;
             }
 
-            // Text shows the current mode; clicking toggles Public/Private.
-            // Friends-only rooms become Public on the first click.
-            _visibilityButton.text = current == Mode.FriendsOnly
-                ? "VISIBILITY: FRIENDS"
-                : "VISIBILITY: " + current.ToString().ToUpperInvariant();
+            _visibilityButton.text = current == Mode.Public
+                ? "VISIBILITY: PUBLIC"
+                : "VISIBILITY: FRIEND";
+            ApplyGameButtonStyle();
             _visibilityButton.tooltip = locked
                 ? "The game's join lock remains active after changing visibility."
-                : "Click to switch Public / Private. F7 also toggles visibility.";
+                : "Click to switch Friend / Public. F7 also toggles visibility.";
         }
 
         private void OnDestroy()
@@ -368,6 +429,7 @@ namespace StonewardsSessionVisibility
             _sessionScreen = null;
             _sessionHeader = null;
             _visibilityButton = null;
+            _buttonHovered = false;
         }
     }
 }
