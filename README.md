@@ -5,7 +5,7 @@ Host-only BepInEx 5 plugin for **switching Public / Private / Friends Only visib
 ## Usage
 
 1. Host a Steam lobby using a r2modman profile that has BepInEx 5 enabled.
-2. Open **Esc → Session**. The mod adds one native-styled **VISIBILITY: PUBLIC / PRIVATE** button between the player list and **Return**. It shows the current mode; click to toggle. In a Friends Only session, the first click switches to Public.
+2. Open **Esc → Session**. The mod adds one native-styled **VISIBILITY: PUBLIC / PRIVATE** button directly below the session title, above the player list. It shows the current mode; click to toggle. In a Friends Only session, the first click switches to Public.
 3. Or press **F7** to toggle directly between Public and Private. Rebind or disable the key in `BepInEx/config/dev.stonewards.sessionvisibility.cfg` after first launch.
 4. Visibility does **not** change the game's existing `Joinable` flag. If the game has locked the lobby, switching to Public does not override the lock and new joins may remain blocked.
 

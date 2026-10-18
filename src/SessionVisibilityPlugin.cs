@@ -35,7 +35,7 @@ namespace StonewardsSessionVisibility
         private static MethodInfo _setHostedModeMethod;
 
         private static VisualElement _sessionScreen;
-        private static Button _returnButton;
+        private static VisualElement _playerListContainer;
         private static Button _visibilityButton;
 
         private static bool Hosting => NetworkServer.active && NetworkClient.active;
@@ -91,9 +91,6 @@ namespace StonewardsSessionVisibility
                     TrySetVisibility(mode == Mode.Public ? Mode.Private : Mode.Public);
             }
 
-            // UI Toolkit measures the pause menu after it opens; follow the
-            // native Return button even when the resolution or layout changes.
-            PositionVisibilityButton();
             if (Time.unscaledTime < _nextUIRefresh)
                 return;
             _nextUIRefresh = Time.unscaledTime + 0.35f;
@@ -228,20 +225,22 @@ namespace StonewardsSessionVisibility
                 var document = component == null ? null : component.GetComponent<UIDocument>();
                 var root = document == null ? null : document.rootVisualElement;
                 var screen = root == null ? null : root.Q<VisualElement>("SessionSettings");
-                var nativeReturn = screen == null ? null : screen.Q<Button>("SessionReturnButton");
-                if (screen == null || nativeReturn == null) return;
+                if (screen == null) return;
 
-                if (_visibilityButton != null &&
-                    ReferenceEquals(_sessionScreen, screen) &&
-                    _visibilityButton.parent != null)
+                // UISessionSettings.Awake also locates this exact container,
+                // then UISessionSettings.Init appends the player rows to it.
+                // Inserting at index zero keeps the toggle immediately below
+                // the native session title, above the entire player roster.
+                var rows = screen.Q<VisualElement>("unity-content-container");
+                var nativeReturn = screen.Q<Button>("SessionReturnButton");
+                if (rows == null || nativeReturn == null)
                 {
-                    _returnButton = nativeReturn;
+                    _plugin.Logger.LogWarning(
+                        "Session player rows or Return button not found; F7 remains available.");
                     return;
                 }
 
-                // Mount inside the actual Session screen, not beside its title
-                // in an unrelated container of the pause-menu visual tree.
-                var button = screen.Q<Button>("StonewardsSessionVisibilityToggle");
+                var button = rows.Q<Button>("StonewardsSessionVisibilityToggle");
                 if (button == null)
                 {
                     button = new Button(ToggleFromMenu)
@@ -249,29 +248,37 @@ namespace StonewardsSessionVisibility
                         name = "StonewardsSessionVisibilityToggle",
                         text = "VISIBILITY: PUBLIC"
                     };
-                    // Reuse the game's button classes, fonts and border artwork.
                     foreach (var className in nativeReturn.GetClasses())
                         button.AddToClassList(className);
 
-                    button.style.position = Position.Absolute;
-                    button.style.marginLeft = 0;
-                    button.style.marginRight = 0;
-                    button.style.marginTop = 0;
-                    button.style.marginBottom = 0;
-                    button.style.paddingLeft = 8;
-                    button.style.paddingRight = 8;
+                    // Flow layout: do not cover any player entries or Return.
+                    button.style.position = Position.Relative;
+                    button.style.flexGrow = 0;
+                    button.style.flexShrink = 0;
+                    button.style.alignSelf = Align.Stretch;
+                    button.style.height = 38;
+                    button.style.marginTop = 5;
+                    button.style.marginBottom = 9;
+                    button.style.marginLeft = 10;
+                    button.style.marginRight = 10;
+                    button.style.paddingLeft = 10;
+                    button.style.paddingRight = 10;
                     button.style.fontSize = 14;
                     button.style.unityFontStyleAndWeight = FontStyle.Bold;
-                    screen.Add(button);
                 }
 
+                // Reattach safely if the game has rebuilt/reordered its roster.
+                if (!ReferenceEquals(button.parent, rows) ||
+                    rows.IndexOf(button) != 0)
+                    rows.Insert(0, button);
+
                 _sessionScreen = screen;
-                _returnButton = nativeReturn;
+                _playerListContainer = rows;
                 _visibilityButton = button;
                 _plugin._lastDisplayedMode = -999;
-                PositionVisibilityButton();
                 RefreshUI();
-                _plugin.Logger.LogInfo("Session visibility toggle mounted above Return.");
+                _plugin.Logger.LogInfo(
+                    "Session visibility toggle inserted below Session title, above player rows.");
             }
             catch (Exception ex)
             {
@@ -284,26 +291,6 @@ namespace StonewardsSessionVisibility
             Mode mode;
             if (TryReadMode(out mode))
                 TrySetVisibility(mode == Mode.Public ? Mode.Private : Mode.Public);
-        }
-
-        private static void PositionVisibilityButton()
-        {
-            if (_visibilityButton == null || _returnButton == null ||
-                _sessionScreen == null || _visibilityButton.panel == null)
-                return;
-
-            Rect nativeRect = _returnButton.worldBound;
-            if (nativeRect.width < 1f || nativeRect.height < 1f) return;
-
-            // Center in the space between the four player rows and Return.
-            float width = Mathf.Min(300f, nativeRect.width * 0.82f);
-            float height = Mathf.Clamp(nativeRect.height * 0.62f, 28f, 36f);
-            Vector2 point = _sessionScreen.WorldToLocal(
-                new Vector2(nativeRect.center.x, nativeRect.yMin - height - 7f));
-            _visibilityButton.style.left = point.x - width * 0.5f;
-            _visibilityButton.style.top = point.y;
-            _visibilityButton.style.width = width;
-            _visibilityButton.style.height = height;
         }
 
         private static void RefreshUI()
@@ -344,7 +331,7 @@ namespace StonewardsSessionVisibility
             if (_harmony != null) _harmony.UnpatchSelf();
             if (ReferenceEquals(_plugin, this)) _plugin = null;
             _sessionScreen = null;
-            _returnButton = null;
+            _playerListContainer = null;
             _visibilityButton = null;
         }
     }
