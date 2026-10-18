@@ -35,7 +35,7 @@ namespace StonewardsSessionVisibility
         private static MethodInfo _setHostedModeMethod;
 
         private static VisualElement _sessionScreen;
-        private static VisualElement _playerListContainer;
+        private static VisualElement _sessionHeader;
         private static Button _visibilityButton;
 
         private static bool Hosting => NetworkServer.active && NetworkClient.active;
@@ -216,6 +216,25 @@ namespace StonewardsSessionVisibility
             RefreshUI();
         }
 
+        // Prefer the actual colored Session title bar. In the game's UXML
+        // the SessionTitle label is nested in it. Walking through ancestors
+        // avoids assuming that the title bar is exactly one parent deep.
+        private static VisualElement FindSessionHeader(Label title, VisualElement screen)
+        {
+            VisualElement fallback = title.parent;
+            for (var current = title.parent; current != null && current != screen;
+                 current = current.parent)
+            {
+                Color background = current.resolvedStyle.backgroundColor;
+                // The native Session heading has a distinctive burgundy fill.
+                if (background.a > 0.45f &&
+                    background.r > background.g * 1.12f &&
+                    background.r > background.b * 1.07f)
+                    return current;
+            }
+            return fallback;
+        }
+
         private static void MountVisibilityButton(object menu)
         {
             if (_plugin == null) return;
@@ -225,22 +244,32 @@ namespace StonewardsSessionVisibility
                 var document = component == null ? null : component.GetComponent<UIDocument>();
                 var root = document == null ? null : document.rootVisualElement;
                 var screen = root == null ? null : root.Q<VisualElement>("SessionSettings");
-                if (screen == null) return;
-
-                // UISessionSettings.Awake also locates this exact container,
-                // then UISessionSettings.Init appends the player rows to it.
-                // Inserting at index zero keeps the toggle immediately below
-                // the native session title, above the entire player roster.
-                var rows = screen.Q<VisualElement>("unity-content-container");
-                var nativeReturn = screen.Q<Button>("SessionReturnButton");
-                if (rows == null || nativeReturn == null)
+                var title = screen == null ? null : screen.Q<Label>("SessionTitle");
+                var nativeReturn = screen == null ? null : screen.Q<Button>("SessionReturnButton");
+                if (screen == null || title == null || nativeReturn == null)
                 {
                     _plugin.Logger.LogWarning(
-                        "Session player rows or Return button not found; F7 remains available.");
+                        "Native Session title or Return button not found; F7 remains available.");
                     return;
                 }
 
-                var button = rows.Q<Button>("StonewardsSessionVisibilityToggle");
+                var header = FindSessionHeader(title, screen);
+                if (header == null || header == screen) return;
+
+                // Extend the game's existing burgundy heading rather than
+                // creating a new panel or taking a slot in the player roster.
+                header.style.height = StyleKeyword.Auto;
+                header.style.minHeight = 118;
+                header.style.flexDirection = FlexDirection.Column;
+                header.style.alignItems = Align.Center;
+                header.style.justifyContent = Justify.Center;
+                header.style.flexShrink = 0;
+                header.style.paddingTop = 8;
+                header.style.paddingBottom = 10;
+
+                // Reuse the native Return button USS classes for its in-game
+                // font, colors, border and hover appearance.
+                var button = screen.Q<Button>("StonewardsSessionVisibilityToggle");
                 if (button == null)
                 {
                     button = new Button(ToggleFromMenu)
@@ -250,35 +279,41 @@ namespace StonewardsSessionVisibility
                     };
                     foreach (var className in nativeReturn.GetClasses())
                         button.AddToClassList(className);
-
-                    // Flow layout: do not cover any player entries or Return.
-                    button.style.position = Position.Relative;
-                    button.style.flexGrow = 0;
-                    button.style.flexShrink = 0;
-                    button.style.alignSelf = Align.Stretch;
-                    button.style.height = 38;
-                    button.style.marginTop = 5;
-                    button.style.marginBottom = 9;
-                    button.style.marginLeft = 10;
-                    button.style.marginRight = 10;
-                    button.style.paddingLeft = 10;
-                    button.style.paddingRight = 10;
-                    button.style.fontSize = 14;
-                    button.style.unityFontStyleAndWeight = FontStyle.Bold;
                 }
 
-                // Reattach safely if the game has rebuilt/reordered its roster.
-                if (!ReferenceEquals(button.parent, rows) ||
-                    rows.IndexOf(button) != 0)
-                    rows.Insert(0, button);
+                button.style.position = Position.Relative;
+                button.style.alignSelf = Align.Center;
+                button.style.flexGrow = 0;
+                button.style.flexShrink = 0;
+                button.style.width = new Length(55, LengthUnit.Percent);
+                button.style.minWidth = 220;
+                button.style.maxWidth = 350;
+                button.style.height = 35;
+                button.style.marginTop = 7;
+                button.style.marginBottom = 0;
+                button.style.marginLeft = 0;
+                button.style.marginRight = 0;
+                button.style.paddingLeft = 8;
+                button.style.paddingRight = 8;
+                button.style.fontSize = 14;
+                button.style.unityFontStyleAndWeight = FontStyle.Bold;
+                button.style.unityTextAlign = TextAnchor.MiddleCenter;
+
+                // Insert immediately after the branch containing the title.
+                // Native player rows are untouched and remain below the header.
+                VisualElement titleBranch = title;
+                while (titleBranch.parent != null && titleBranch.parent != header)
+                    titleBranch = titleBranch.parent;
+                int targetIndex = header.IndexOf(titleBranch) + 1;
+                if (button.parent != header || header.IndexOf(button) != targetIndex)
+                    header.Insert(targetIndex, button);
 
                 _sessionScreen = screen;
-                _playerListContainer = rows;
+                _sessionHeader = header;
                 _visibilityButton = button;
                 _plugin._lastDisplayedMode = -999;
                 RefreshUI();
-                _plugin.Logger.LogInfo(
-                    "Session visibility toggle inserted below Session title, above player rows.");
+                _plugin.Logger.LogInfo("Visibility toggle embedded in expanded Session title header.");
             }
             catch (Exception ex)
             {
@@ -331,7 +366,7 @@ namespace StonewardsSessionVisibility
             if (_harmony != null) _harmony.UnpatchSelf();
             if (ReferenceEquals(_plugin, this)) _plugin = null;
             _sessionScreen = null;
-            _playerListContainer = null;
+            _sessionHeader = null;
             _visibilityButton = null;
         }
     }
